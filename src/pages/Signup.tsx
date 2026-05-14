@@ -10,34 +10,34 @@ const Signup = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
+    
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            full_name: fullName,
-            phone: phone,
-          },
-        },
+            first_name: fullName.split(' ')[0],
+            last_name: fullName.split(' ').slice(1).join(' '),
+            phone_number: phoneNumber,
+            role: 'customer'
+          }
+        }
       });
 
       if (error) throw error;
-
-      if (data.user) {
-        toast.success("Registration successful! Please check your email for verification.");
-        navigate("/login");
-      }
+      
+      toast.success("Account created successfully! Please check your email for verification.");
+      navigate("/login");
     } catch (error: any) {
-      toast.error(error.message || "An error occurred during signup");
+      toast.error(error.message || "Failed to create account");
     } finally {
       setLoading(false);
     }
@@ -61,9 +61,9 @@ const Signup = () => {
               <Input 
                 placeholder="John Doe" 
                 className="h-14 pl-12" 
+                required 
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                required 
               />
               <User className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
@@ -75,9 +75,9 @@ const Signup = () => {
                 type="email" 
                 placeholder="john@example.com" 
                 className="h-14 pl-12" 
+                required 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required 
               />
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
@@ -89,9 +89,9 @@ const Signup = () => {
                 type="tel" 
                 placeholder="+234 ..." 
                 className="h-14 pl-12" 
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
                 required 
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
               />
               <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
@@ -103,18 +103,14 @@ const Signup = () => {
                 type="password" 
                 placeholder="••••••••" 
                 className="h-14 pl-12" 
+                required 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required 
               />
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
           </div>
-          <Button 
-            type="submit" 
-            disabled={loading}
-            className="w-full h-14 bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-lg mt-4"
-          >
+          <Button type="submit" disabled={loading} className="w-full h-14 bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-lg mt-4">
             {loading ? "Creating Account..." : "Create Account"}
           </Button>
         </form>

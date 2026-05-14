@@ -24,12 +24,24 @@ const Login = () => {
 
       if (error) throw error;
 
-      if (data.user) {
-        toast.success("Welcome back to NAGARTA!");
+      toast.success("Welcome back to NAGARTA!");
+      
+      // Basic role-based routing (placeholder - ideally fetch profile role)
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profile?.role === 'admin') {
+        navigate("/admin");
+      } else if (profile?.role === 'driver') {
+        navigate("/driver");
+      } else {
         navigate("/");
       }
     } catch (error: any) {
-      toast.error(error.message || "Invalid login credentials");
+      toast.error(error.message || "Invalid credentials");
     } finally {
       setLoading(false);
     }
@@ -54,9 +66,9 @@ const Login = () => {
                 type="email" 
                 placeholder="name@company.com" 
                 className="h-14 pl-12" 
+                required 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required 
               />
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
@@ -71,18 +83,14 @@ const Login = () => {
                 type="password" 
                 placeholder="••••••••" 
                 className="h-14 pl-12" 
+                required 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required 
               />
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
             </div>
           </div>
-          <Button 
-            type="submit" 
-            disabled={loading}
-            className="w-full h-14 bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-lg shadow-lg"
-          >
+          <Button type="submit" disabled={loading} className="w-full h-14 bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-lg shadow-lg">
             {loading ? "Signing In..." : "Sign In"}
           </Button>
         </form>

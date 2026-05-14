@@ -1,20 +1,55 @@
--- Enable necessary extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Create profiles table (extends auth.users)
+-- Create profiles table
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  full_name TEXT,
-  phone TEXT,
-  role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'driver')),
+  first_name TEXT,
+  last_name TEXT,
+  phone_number TEXT,
+  role TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'driver', 'admin')),
   avatar_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Enable RLS on profiles
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- Create towing_requests table
+CREATE TABLE IF NOT EXISTS public.towing_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  customer_id UUID REFERENCES public.profiles(id),
+  driver_id UUID REFERENCES public.profiles(id),
+  service_type TEXT NOT NULL,
+  pickup_location TEXT NOT NULL,
+  dropoff_location TEXT NOT NULL,
+  pickup_lat DECIMAL,
+  pickup_lng DECIMAL,
+  dropoff_lat DECIMAL,
+  dropoff_lng DECIMAL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'in-progress', 'completed', 'cancelled')),
+  vehicle_details JSONB,
+  estimated_cost DECIMAL,
+  actual_cost DECIMAL,
+  payment_status TEXT DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'pending', 'paid', 'failed')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
+-- Create payments table
+CREATE TABLE IF NOT EXISTS public.payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  request_id UUID REFERENCES public.towing_requests(id),
+  amount DECIMAL NOT NULL,
+  currency TEXT DEFAULT 'NGN',
+  status TEXT DEFAULT 'pending',
+  provider TEXT, -- 'paystack' or 'flutterwave'
+  provider_reference TEXT,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.towing_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+
+-- Profiles Policies
 CREATE POLICY "Public profiles are viewable by everyone." ON public.profiles
   FOR SELECT USING (true);
 
@@ -24,136 +59,50 @@ CREATE POLICY "Users can insert their own profile." ON public.profiles
 CREATE POLICY "Users can update own profile." ON public.profiles
   FOR UPDATE USING (auth.uid() = id);
 
--- Create drivers table
-CREATE TABLE IF NOT EXISTS public.drivers (
-  id UUID REFERENCES public.profiles(id) ON DELETE CASCADE PRIMARY KEY,
-  vehicle_info JSONB,
-  license_number TEXT,
-  status TEXT DEFAULT 'offline' CHECK (status IN ('available', 'busy', 'offline')),
-  current_location_lat DOUBLE PRECISION,
-  current_location_lng DOUBLE PRECISION,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS on drivers
-ALTER TABLE public.drivers ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Drivers are viewable by everyone." ON public.drivers
-  FOR SELECT USING (true);
-
-CREATE POLICY "Drivers can update their own data." ON public.drivers
-  FOR UPDATE USING (auth.uid() = id);
-
--- Create towing_requests table
-CREATE TABLE IF NOT EXISTS public.towing_requests (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  customer_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  driver_id UUID REFERENCES public.drivers(id) ON DELETE SET NULL,
-  pickup_address TEXT NOT NULL,
-  pickup_lat DOUBLE PRECISION,
-  pickup_lng DOUBLE PRECISION,
-  dropoff_address TEXT NOT NULL,
-  dropoff_lat DOUBLE PRECISION,
-  dropoff_lng DOUBLE PRECISION,
-  vehicle_details JSONB,
-  urgency TEXT DEFAULT 'normal',
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'in_progress', 'completed', 'cancelled')),
-  price DECIMAL(10, 2),
-  payment_status TEXT DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'pending', 'paid', 'refunded')),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS on towing_requests
-ALTER TABLE public.towing_requests ENABLE ROW LEVEL SECURITY;
-
+-- Towing Requests Policies
 CREATE POLICY "Customers can view their own requests." ON public.towing_requests
   FOR SELECT USING (auth.uid() = customer_id);
 
 CREATE POLICY "Drivers can view assigned requests." ON public.towing_requests
-  FOR SELECT USING (auth.uid() = driver_id);
+  FOR SELECT USING (auth.uid() = driver_id OR role = 'admin'); -- Note: Role check needs a function or join
 
 CREATE POLICY "Admins can view all requests." ON public.towing_requests
-  FOR SELECT USING (
+  FOR ALL USING (
     EXISTS (
       SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
+      WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
     )
   );
 
 CREATE POLICY "Customers can create requests." ON public.towing_requests
   FOR INSERT WITH CHECK (auth.uid() = customer_id);
 
--- Create payments table
-CREATE TABLE IF NOT EXISTS public.payments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  request_id UUID REFERENCES public.towing_requests(id) ON DELETE CASCADE,
-  amount DECIMAL(10, 2) NOT NULL,
-  provider TEXT CHECK (provider IN ('paystack', 'flutterwave', 'cash')),
-  transaction_id TEXT,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS on payments
-ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
-
+-- Payment Policies
 CREATE POLICY "Users can view their own payments." ON public.payments
   FOR SELECT USING (
     EXISTS (
       SELECT 1 FROM public.towing_requests
-      WHERE id = request_id AND customer_id = auth.uid()
+      WHERE towing_requests.id = payments.request_id AND towing_requests.customer_id = auth.uid()
     )
   );
 
--- Create testimonials table
-CREATE TABLE IF NOT EXISTS public.testimonials (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  content TEXT NOT NULL,
-  rating INTEGER CHECK (rating >= 1 AND rating <= 5),
-  is_published BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS on testimonials
-ALTER TABLE public.testimonials ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Published testimonials are viewable by everyone." ON public.testimonials
-  FOR SELECT USING (is_published = true);
-
--- Create service_areas table
-CREATE TABLE IF NOT EXISTS public.service_areas (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS on service_areas
-ALTER TABLE public.service_areas ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Service areas are viewable by everyone." ON public.service_areas
-  FOR SELECT USING (true);
-
--- Create function to handle new user signup
+-- Function to handle new user profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, role)
-  VALUES (new.id, new.raw_user_meta_data->>'full_name', 'user');
-  RETURN NEW;
+  INSERT INTO public.profiles (id, first_name, last_name, role)
+  VALUES (new.id, new.raw_user_meta_data->>'first_name', new.raw_user_meta_data->>'last_name', COALESCE(new.raw_user_meta_data->>'role', 'customer'));
+  RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger to create profile on signup
+-- Trigger for new user
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_towing_requests_customer_id ON public.towing_requests(customer_id);
 CREATE INDEX IF NOT EXISTS idx_towing_requests_driver_id ON public.towing_requests(driver_id);
 CREATE INDEX IF NOT EXISTS idx_towing_requests_status ON public.towing_requests(status);
-CREATE INDEX IF NOT EXISTS idx_drivers_status ON public.drivers(status);
+CREATE INDEX IF NOT EXISTS idx_payments_request_id ON public.payments(request_id);

@@ -1,78 +1,68 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Truck, MapPin, Car, AlertTriangle, Upload, Check } from "lucide-react";
+import { Truck, MapPin, Car, Phone, AlertTriangle, Upload, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
-import { useNavigate } from "react-router-dom";
 
 const BookTowing = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const navigate = useNavigate();
-
-  // Form State
   const [formData, setFormData] = useState({
     vehicleModel: "",
     licensePlate: "",
     serviceType: "",
-    pickupAddress: "",
-    dropoffAddress: "",
-    urgency: "standard",
-    details: ""
+    pickupLocation: "",
+    dropoffLocation: "",
+    issueDetails: "",
+    urgency: "standard"
   });
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-    });
-  }, []);
-
-  const nextStep = () => {
-    if (step === 1 && !user) {
-      toast.error("Please login to continue with your booking");
-      navigate("/login");
-      return;
-    }
-    setStep(s => s + 1);
-  };
-  
+  const nextStep = () => setStep(s => s + 1);
   const prevStep = () => setStep(s => s - 1);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      toast.error("You must be logged in to submit a request");
-      return;
-    }
-
     setLoading(true);
     
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        toast.error("Please login to book a service");
+        return;
+      }
+
       const { data, error } = await supabase
-        .from('towing_requests')
-        .insert([
-          {
-            customer_id: user.id,
-            pickup_address: formData.pickupAddress,
-            dropoff_address: formData.dropoffAddress,
-            urgency: formData.urgency,
-            vehicle_details: {
-              model: formData.vehicleModel,
-              plate: formData.licensePlate,
-              service: formData.serviceType,
-              issue: formData.details
-            },
-            status: 'pending'
-          }
-        ])
-        .select();
+        .from("towing_requests")
+        .insert({
+          customer_id: userData.user.id,
+          service_type: formData.serviceType,
+          pickup_location: formData.pickupLocation,
+          dropoff_location: formData.dropoffLocation,
+          vehicle_details: {
+            model: formData.vehicleModel,
+            plate: formData.licensePlate,
+            issue: formData.issueDetails
+          },
+          status: 'pending'
+        })
+        .select()
+        .single();
 
       if (error) throw error;
+
+      // Notify Admin via Edge Function
+      await supabase.functions.invoke('notify-admin', {
+        body: {
+          request_id: data.id,
+          customer_name: userData.user.user_metadata?.first_name || 'Customer',
+          service_type: formData.serviceType,
+          location: formData.pickupLocation
+        }
+      });
 
       setStep(4);
       toast.success("Request Submitted! A dispatcher will call you in seconds.");
@@ -118,7 +108,7 @@ const BookTowing = () => {
                     placeholder="e.g. Toyota Camry 2022" 
                     className="h-14" 
                     value={formData.vehicleModel}
-                    onChange={e => setFormData({...formData, vehicleModel: e.target.value})}
+                    onChange={(e) => setFormData({...formData, vehicleModel: e.target.value})}
                   />
                 </div>
                 <div className="space-y-2">
@@ -127,12 +117,12 @@ const BookTowing = () => {
                     placeholder="ABC-123-XY" 
                     className="h-14" 
                     value={formData.licensePlate}
-                    onChange={e => setFormData({...formData, licensePlate: e.target.value})}
+                    onChange={(e) => setFormData({...formData, licensePlate: e.target.value})}
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-bold">Service Type</label>
-                  <Select onValueChange={v => setFormData({...formData, serviceType: v})}>
+                  <Select onValueChange={(v) => setFormData({...formData, serviceType: v})}>
                     <SelectTrigger className="h-14">
                       <SelectValue placeholder="Select Service" />
                     </SelectTrigger>
@@ -164,8 +154,8 @@ const BookTowing = () => {
                     <Input 
                       placeholder="Enter address or use map" 
                       className="h-14 pl-12" 
-                      value={formData.pickupAddress}
-                      onChange={e => setFormData({...formData, pickupAddress: e.target.value})}
+                      value={formData.pickupLocation}
+                      onChange={(e) => setFormData({...formData, pickupLocation: e.target.value})}
                     />
                     <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-yellow-500" size={20} />
                   </div>
@@ -175,11 +165,11 @@ const BookTowing = () => {
                   <Input 
                     placeholder="Where should we take the vehicle?" 
                     className="h-14" 
-                    value={formData.dropoffAddress}
-                    onChange={e => setFormData({...formData, dropoffAddress: e.target.value})}
+                    value={formData.dropoffLocation}
+                    onChange={(e) => setFormData({...formData, dropoffLocation: e.target.value})}
                   />
                 </div>
-                <div className="h-48 bg-zinc-200 dark:bg-zinc-800 rounded-xl flex items-center justify-center overflow-hidden relative">
+                <div className="h-48 bg-zinc-200 dark:bg-zinc-800 rounded-xl flex items-center justify-center overflow-hidden">
                   <img src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=1000" alt="Map Placeholder" className="w-full h-full object-cover opacity-50" />
                   <span className="absolute font-bold text-zinc-500">Interactive Map Integration</span>
                 </div>
@@ -203,12 +193,12 @@ const BookTowing = () => {
                     <button 
                       type="button" 
                       onClick={() => setFormData({...formData, urgency: 'urgent'})}
-                      className={`p-4 border-2 rounded-xl font-bold transition-colors ${formData.urgency === 'urgent' ? 'border-red-500 text-red-500 bg-red-500/5' : 'border-zinc-200 text-zinc-400'}`}
+                      className={`p-4 border-2 rounded-xl font-bold ${formData.urgency === 'urgent' ? 'border-red-500 text-red-500 bg-red-500/5' : 'border-zinc-200'}`}
                     >EXTREME URGENT</button>
                     <button 
                       type="button" 
                       onClick={() => setFormData({...formData, urgency: 'standard'})}
-                      className={`p-4 border-2 rounded-xl font-bold transition-colors ${formData.urgency === 'standard' ? 'border-yellow-500 text-yellow-500 bg-yellow-500/5' : 'border-zinc-200 text-zinc-400'}`}
+                      className={`p-4 border-2 rounded-xl font-bold ${formData.urgency === 'standard' ? 'border-yellow-500 text-yellow-500 bg-yellow-500/5' : 'border-zinc-200'}`}
                     >STANDARD</button>
                   </div>
                 </div>
@@ -217,8 +207,8 @@ const BookTowing = () => {
                   <Textarea 
                     placeholder="Tell us what happened..." 
                     className="min-h-[100px]" 
-                    value={formData.details}
-                    onChange={e => setFormData({...formData, details: e.target.value})}
+                    value={formData.issueDetails}
+                    onChange={(e) => setFormData({...formData, issueDetails: e.target.value})}
                   />
                 </div>
                 <div className="space-y-2">
@@ -245,9 +235,9 @@ const BookTowing = () => {
               </div>
               <h2 className="text-4xl font-black mb-4">Request Confirmed!</h2>
               <p className="text-muted-foreground text-lg mb-8 max-w-sm mx-auto">
-                Your request has been saved. A driver has been assigned and will contact you via +234 800-NAGARTA.
+                Your request has been sent to our dispatch team. A driver will contact you via +234 800-NAGARTA.
               </p>
-              <Button onClick={() => navigate("/")} variant="outline" className="px-10 h-14">Back to Home</Button>
+              <Button onClick={() => setStep(1)} variant="outline" className="px-10 h-14">View Status</Button>
             </motion.div>
           )}
         </div>
